@@ -255,10 +255,6 @@
         }
 
         /* Add to your existing style section */
-        .leaflet-tile {
-            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
-        }
-
         .leaflet-container {
             background: #303035;
         }
@@ -270,6 +266,31 @@
 
         .leaflet-popup-tip {
             background-color: var(--dark-bg);
+        }
+
+        /* Add this to your existing style section */
+        .dark-tiles {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+
+        .leaflet-control-layers {
+            background-color: var(--dark-bg) !important;
+            border: 1px solid var(--primary-gradient-start) !important;
+            border-radius: var(--border-radius) !important;
+            color: var(--text-color) !important;
+        }
+
+        .leaflet-control-layers-list {
+            color: var(--text-color) !important;
+        }
+
+        .leaflet-control-layers-toggle {
+            background-color: var(--dark-bg) !important;
+            border: 1px solid var(--primary-gradient-start) !important;
+        }
+
+        .leaflet-control-layers-expanded {
+            padding: 10px !important;
         }
     </style>
 </head>
@@ -331,7 +352,7 @@
     </div>
 
     <!-- First load Supabase -->
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Then load Leaflet -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     <!-- Then your custom script -->
@@ -340,30 +361,52 @@
             // Initialize shared variables at the top
             let selectedBus = null;
             let userMarker = null;
-            const busMarkers = new Map(); // Define busMarkers as const at the top level
+            const busMarkers = new Map();
             
             // Initialize Supabase client
-            const { createClient } = supabase;
-            const supabaseClient = createClient(
-                'https://jeszxshbzmnxdoqjltuk.supabase.co',
-                'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Implc3p4c2hiem1ueGRvcWpsdHVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA4MzM0NjIsImV4cCI6MjA1NjQwOTQ2Mn0.FgZmXxDX00_9OLyLgFM_dyrPpb1eISeIte9s1edLPcE'
-            );
+            const supabaseUrl = 'https://jeszxshbzmnxdoqjltuk.supabase.co';
+            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Implc3p4c2hiem1ueGRvcWpsdHVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA4MzM0NjIsImV4cCI6MjA1NjQwOTQ2Mn0.FgZmXxDX00_9OLyLgFM_dyrPpb1eISeIte9s1edLPcE';
+            const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
             // Initialize map and icons
-            const map = L.map('map').setView([15.3267, 120.0830], 13);
-            
+            const map = L.map('map', {
+                center: [15.3267, 120.0830],
+                zoom: 13,
+                zoomControl: true
+            });
+
+            // Define basemap layers
+            const baseMaps = {
+                "Light Mode": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }),
+                "Dark Mode": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19,
+                    className: 'dark-tiles'
+                }),
+                "Satellite": L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                    attribution: '© Google Satellite',
+                    maxZoom: 20
+                }),
+                "Streets": L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors, Tiles style by Humanitarian OpenStreetMap Team',
+                    maxZoom: 19
+                })
+            };
+
+            // Add the light mode layer by default
+            baseMaps["Light Mode"].addTo(map);
+
+            // Add layer control to the map
+            L.control.layers(baseMaps, null, {
+                position: 'topright',
+                collapsed: true // Changed to true to save space
+            }).addTo(map);
+
             // Add this code right after the map initialization
             console.log('Map initialized:', map);
-
-            // Add tile layer with logging
-            try {
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
-                }).addTo(map);
-                console.log('Tile layer added successfully');
-            } catch (error) {
-                console.error('Error adding tile layer:', error);
-            }
 
             // Add error event listener to map
             map.on('error', function(e) {

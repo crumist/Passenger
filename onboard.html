@@ -334,15 +334,6 @@
             text-align: center;
         }
         
-        /* Dark map style overrides */
-        .leaflet-tile {
-            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
-        }
-        
-        .leaflet-container {
-            background: #303035;
-        }
-        
         /* Custom notification */
         .notification {
             position: fixed;
@@ -493,16 +484,45 @@
         .alert-driver-btn:hover {
             background-color: #2196f3;
         }
+
+        /* Add this to your existing style section */
+        .dark-tiles {
+            filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+        }
+        
+        .leaflet-control-layers {
+            background-color: var(--dark-bg) !important;
+            border: 1px solid var(--primary-gradient-start) !important;
+            border-radius: var(--border-radius) !important;
+            color: var(--text-color) !important;
+        }
+
+        .leaflet-control-layers-list {
+            color: var(--text-color) !important;
+        }
+
+        .leaflet-control-layers-toggle {
+            background-color: var(--dark-bg) !important;
+            border: 1px solid var(--primary-gradient-start) !important;
+        }
+
+        .leaflet-control-layers-expanded {
+            padding: 10px !important;
+        }
     </style>
     <!-- Add this before your main script -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <!-- Add this audio element -->
+    <audio id="alertSound" preload="auto">
+        <source src="alert.mp3" type="audio/mpeg">
+    </audio>
 </head>
 <body>
     <div class="app-container">
         <div class="header">
     <div class="back-button" onclick="window.location.href='viewmap.html'">
         <div class="logo-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="24" height="24" viewBox="0  0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M19 12H5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 <path d="M12 19L5 12L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
@@ -635,8 +655,35 @@
     document.addEventListener('DOMContentLoaded', async function() {
         // Initialize map
         map = L.map('map').setView([15.3267, 120.0830], 9);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
+        
+        // Define basemap layers
+        const baseMaps = {
+            "Light Mode": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19
+            }),
+            "Dark Mode": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                maxZoom: 19,
+                className: 'dark-tiles'
+            }),
+            "Satellite": L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                attribution: '© Google Satellite',
+                maxZoom: 20
+            }),
+            "Streets": L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors, Tiles style by Humanitarian OpenStreetMap Team',
+                maxZoom: 19
+            })
+        };
+
+        // Add the light mode layer by default
+        baseMaps["Light Mode"].addTo(map);
+
+        // Add layer control to the map
+        L.control.layers(baseMaps, null, {
+            position: 'topright',
+            collapsed: true
         }).addTo(map);
 
         // Initialize UI elements
@@ -1971,7 +2018,46 @@
         showNotification(`Alert will trigger when ${reminderDistance}m from destination`);
     }
 
+    function playBeep() {
+        // Create audio context
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Create oscillator
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        // Configure sound
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // 880Hz = A5 note
+        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime); // Lower volume
+        
+        // Connect nodes
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Play sound
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2); // Beep for 200ms
+    }
+
+    // Update showDistanceNotification to use backup beep
     function showDistanceNotification() {
+        // Try to play audio file first
+        const alertSound = document.getElementById('alertSound');
+        if (alertSound) {
+            alertSound.play().catch(error => {
+                console.log('Audio playback failed, using backup beep:', error);
+                playBeep();
+            });
+        } else {
+            playBeep();
+        }
+        
+        // Vibrate - pattern: 500ms vibrate, 200ms pause, 500ms vibrate
+        if ('vibrate' in navigator) {
+            navigator.vibrate([500, 200, 500]);
+        }
+
         const notification = document.createElement('div');
         notification.className = 'arrival-notification';
         notification.innerHTML = `
@@ -1984,11 +2070,6 @@
             </button>
         `;
         document.body.appendChild(notification);
-        
-        // Vibrate if supported
-        if ('vibrate' in navigator) {
-            navigator.vibrate([200, 100, 200]);
-        }
     }
 });
     </script>
@@ -2001,6 +2082,18 @@
                 this.disabled = false;
             }, 5000); // Re-enable button after 5 seconds
         });
+    </script>
+    <script>
+        // ...existing code...
+        document.getElementById('endJourneyBtn').addEventListener('click', function() {
+            // Clear intervals and stored data
+            if (distanceUpdateInterval) {
+                clearInterval(distanceUpdateInterval);
+            }
+            sessionStorage.removeItem('onboardBusInfo');
+            window.location.href = 'index.html';
+        });
+        // ...existing code...
     </script>
 </body>
 </html>
