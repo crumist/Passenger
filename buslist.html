@@ -303,6 +303,8 @@
         }
         
     </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
 </head>
 <body>
     <div class="app-container">
@@ -470,42 +472,101 @@
                 }
     
                 // Update bus list with the fetched buses
-                function updateBusList(buses) {
+                async function updateBusList(buses) {
                     busList.innerHTML = '';
                     
                     if (buses.length === 0) {
                         emptyState.style.display = 'flex';
                         busList.style.display = 'none';
-                    } else {
-                        emptyState.style.display = 'none';
-                        busList.style.display = 'block';
+                        return;
+                    }
+                
+                    emptyState.style.display = 'none';
+                    busList.style.display = 'block';
+                    
+                    // Show loading state for all buses first
+                    buses.forEach((bus, index) => {
+                        const busItem = document.createElement('div');
+                        busItem.className = 'bus-item';
+                        busItem.setAttribute('data-id', bus.busnumber);
                         
-                        buses.forEach((bus, index) => {
-                            const distance = currentLocation ? calculateDistance(currentLocation.lat, currentLocation.lng, bus.latitude, bus.longitude) : null;
-                            const distanceText = distance ? (distance < 1000 ? `${distance.toFixed(0)} m` : `${(distance / 1000).toFixed(1)} km`) : 'N/A';
-                            const etaText = distance ? calculateETA(distance) : 'N/A';
-    
-                            const busItem = document.createElement('div');
-                            busItem.className = 'bus-item';
-                            busItem.setAttribute('data-id', bus.busnumber);
+                        busItem.innerHTML = `
+                            <div class="bus-icon">B${index + 1}</div>
+                            <div class="bus-details">
+                                <div class="bus-number">Bus #${bus.busnumber}</div>
+                                <div class="bus-route">
+                                    ${bus.routename}
+                                    ${selectedDirection ? `<span class="via-badge">${selectedDirection}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="bus-info">
+                                <div class="bus-distance">Calculating...</div>
+                                <div class="bus-eta">Calculating...</div>
+                            </div>
+                        `;
+                        
+                        busList.appendChild(busItem);
+                    });
+                
+                    // Then update each bus with accurate route calculations
+                    if (currentLocation) {
+                        for (const [index, bus] of buses.entries()) {
+                            try {
+                                const routeInfo = await calculateRouteDistanceAndETA(
+                                    currentLocation.lat,
+                                    currentLocation.lng,
+                                    bus.latitude,
+                                    bus.longitude
+                                );
+                
+                                const distanceInKm = routeInfo.distance / 1000;
+                                
+                                // Calculate ETA using fixed 30kph speed
+                                const etaText = calculateETA(routeInfo.distance);  // Use our 30kph calculation
+                
+                                // Format distance text
+                                const distanceText = distanceInKm < 1 
+                                    ? `${Math.round(routeInfo.distance)}m`
+                                    : `${distanceInKm.toFixed(1)}km`;
+                
+                                // Update the existing bus item with calculated values
+                                const busItem = document.querySelector(`.bus-item[data-id="${bus.busnumber}"]`);
+                                if (busItem) {
+                                    const distanceElement = busItem.querySelector('.bus-distance');
+                                    const etaElement = busItem.querySelector('.bus-eta');
+                                    
+                                    if (distanceElement) distanceElement.textContent = distanceText;
+                                    if (etaElement) etaElement.textContent = etaText;
+                
+                                    // Store the calculated values as data attributes for later use
+                                    busItem.setAttribute('data-distance', distanceText);
+                                    busItem.setAttribute('data-eta', etaText);
+                
+                                    // Update click handler with new values
+                                    busItem.onclick = () => handleBusSelection(bus, distanceText, etaText);
+                                }
+                
+                            } catch (error) {
+                                console.error(`Error calculating route for bus ${bus.busnumber}:`, error);
+                                // Update with error state
+                                const busItem = document.querySelector(`.bus-item[data-id="${bus.busnumber}"]`);
+                                if (busItem) {
+                                    const distanceElement = busItem.querySelector('.bus-distance');
+                                    const etaElement = busItem.querySelector('.bus-eta');
+                                    
+                                    if (distanceElement) distanceElement.textContent = 'N/A';
+                                    if (etaElement) etaElement.textContent = 'N/A';
+                                }
+                            }
+                        }
+                    } else {
+                        // If no location available, show N/A for all buses
+                        document.querySelectorAll('.bus-item').forEach(busItem => {
+                            const distanceElement = busItem.querySelector('.bus-distance');
+                            const etaElement = busItem.querySelector('.bus-eta');
                             
-                            busItem.innerHTML = `
-                                <div class="bus-icon">B${index + 1}</div>
-                                <div class="bus-details">
-                                    <div class="bus-number">Bus #${bus.busnumber}</div>
-                                    <div class="bus-route">
-                                        ${bus.routename}
-                                        ${selectedDirection ? `<span class="via-badge">${selectedDirection}</span>` : ''}
-                                    </div>
-                                </div>
-                                <div class="bus-info">
-                                    <div class="bus-distance">${distanceText}</div>
-                                    <div class="bus-eta">${etaText}</div>
-                                </div>
-                            `;
-                             
-                            busItem.addEventListener('click', () => handleBusSelection(bus));
-                            busList.appendChild(busItem);
+                            if (distanceElement) distanceElement.textContent = 'N/A';
+                            if (etaElement) etaElement.textContent = 'N/A';
                         });
                     }
                 }
@@ -612,8 +673,185 @@
             }
         </script>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
 
+<!-- Replace the calculateDistance and calculateETA functions with these new versions -->
+<script>
+    // Add this after your supabaseClient initialization
+    let routingControl = null;
+    
+    // Create a hidden map container for routing calculations
+    const hiddenMap = document.createElement('div');
+    hiddenMap.style.display = 'none';
+    document.body.appendChild(hiddenMap);
+    
+    // Initialize hidden Leaflet map
+    const map = L.map(hiddenMap, {
+        center: [15.3267, 120.0830],
+        zoom: 13
+    });
+    
+    // Add a tile layer (required for routing to work)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-    </script>
+    // New function to calculate route-based distance and ETA
+    async function calculateRouteDistanceAndETA(userLat, userLng, busLat, busLng) {
+        return new Promise((resolve, reject) => {
+            if (routingControl) {
+                map.removeControl(routingControl);
+            }
+
+            routingControl = L.Routing.control({
+                waypoints: [
+                    L.latLng(userLat, userLng),
+                    L.latLng(busLat, busLng)
+                ],
+                router: new L.Routing.OSRMv1({
+                    serviceUrl: 'https://router.project-osrm.org/route/v1',
+                    profile: 'driving'
+                }),
+                lineOptions: {
+                    styles: [{
+                        color: '#4a6bff',
+                        opacity: 0.8,
+                        weight: 4
+                    }]
+                },
+                show: false,
+                addWaypoints: false,
+                draggableWaypoints: false,
+                fitSelectedRoutes: false
+            }).addTo(map);
+
+            routingControl.on('routesfound', function(e) {
+                const routes = e.routes;
+                const summary = routes[0].summary;
+                
+                const distanceInMeters = summary.totalDistance;
+                const timeInSeconds = summary.totalTime;
+                
+                resolve({
+                    distance: distanceInMeters,
+                    time: timeInSeconds
+                });
+            });
+
+            routingControl.on('routingerror', function(e) {
+                reject(e);
+            });
+        });
+    }
+
+    // Update the updateBusList function to use the new calculation
+    async function updateBusList(buses) {
+        busList.innerHTML = '';
+        
+        if (buses.length === 0) {
+            emptyState.style.display = 'flex';
+            busList.style.display = 'none';
+            return;
+        }
+
+        emptyState.style.display = 'none';
+        busList.style.display = 'block';
+        
+        for (const [index, bus] of buses.entries()) {
+            let distanceText = 'Calculating...';
+            let etaText = 'Calculating...';
+
+            if (currentLocation) {
+                try {
+                    const routeInfo = await calculateRouteDistanceAndETA(
+                        currentLocation.lat,
+                        currentLocation.lng,
+                        bus.latitude,
+                        bus.longitude
+                    );
+
+                    const distanceInKm = routeInfo.distance / 1000;
+                    // Use fixed speed ETA calculation instead of routing machine's time
+                    const etaText = calculateFixedSpeedETA(routeInfo.distance);
+
+                    distanceText = distanceInKm < 1 
+                        ? `${Math.round(routeInfo.distance)}m`
+                        : `${distanceInKm.toFixed(1)}km`;
+
+                    // ...existing code...
+                } catch (error) {
+                    console.error('Error calculating route:', error);
+                    distanceText = 'N/A';
+                    etaText = 'N/A';
+                }
+            }
+
+            const busItem = document.createElement('div');
+            busItem.className = 'bus-item';
+            busItem.setAttribute('data-id', bus.busnumber);
+            
+            busItem.innerHTML = `
+                <div class="bus-icon">B${index + 1}</div>
+                <div class="bus-details">
+                    <div class="bus-number">Bus #${bus.busnumber}</div>
+                    <div class="bus-route">
+                        ${bus.routename}
+                        ${selectedDirection ? `<span class="via-badge">${selectedDirection}</span>` : ''}
+                    </div>
+                </div>
+                <div class="bus-info">
+                    <div class="bus-distance">${distanceText}</div>
+                    <div class="bus-eta">${etaText}</div>
+                </div>
+            `;
+            
+            busItem.addEventListener('click', () => handleBusSelection(bus, distanceText, etaText));
+            busList.appendChild(busItem);
+        }
+    }
+
+    // Update the handleBusSelection function to include the calculated values
+    function handleBusSelection(bus, distance, eta) {
+        const busData = {
+            busId: bus.id,
+            busNumber: bus.busnumber,
+            routeName: bus.routename,
+            latitude: bus.latitude,
+            longitude: bus.longitude,
+            recorded_at: bus.recorded_at,
+            distance: distance,
+            eta: eta
+        };
+        
+        sessionStorage.setItem('selectedBus', JSON.stringify(busData));
+        
+        const allBusItems = document.querySelectorAll('.bus-item');
+        allBusItems.forEach(item => {
+            item.classList.remove('selected');
+            if(item.getAttribute('data-id') === bus.busnumber) {
+                item.classList.add('selected');
+            }
+        });
+        
+        const mapBtn = document.getElementById('mapBtn');
+        mapBtn.disabled = false;
+    }
+
+    // Function to calculate ETA based on distance with fixed 30kph speed
+    function calculateFixedSpeedETA(distanceInMeters) {
+        const speedKph = 30;
+        const speedMps = speedKph * 1000 / 3600; // Convert speed to meters per second
+        const etaSeconds = distanceInMeters / speedMps;
+        const timeInMinutes = Math.round(etaSeconds / 60);
+        
+        if (timeInMinutes < 60) {
+            return `${timeInMinutes}m`;
+        } else {
+            const hours = Math.floor(timeInMinutes / 60);
+            const minutes = timeInMinutes % 60;
+            return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+        }
+    }
+</script>
 </body>
 </html>

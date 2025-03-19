@@ -509,6 +509,16 @@
         .leaflet-control-layers-expanded {
             padding: 10px !important;
         }
+
+        .leaflet-routing-container {
+            display: none !important;
+        }
+
+        @keyframes dashedLine {
+            to {
+                stroke-dashoffset: -20;
+            }
+        }
     </style>
     <!-- Add this before your main script -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
@@ -2095,5 +2105,149 @@
         });
         // ...existing code...
     </script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+
+<script>
+let routeControl = null; // Global variable to store the route control
+
+function drawRouteToDropPoint(userLatLng, dropPointLatLng) {
+    // Remove existing route if it exists
+    if (routeControl) {
+        map.removeControl(routeControl);
+    }
+
+    // Create a new route using Leaflet Routing Machine
+    routeControl = L.Routing.control({
+        waypoints: [
+            L.latLng(userLatLng.lat, userLatLng.lng),
+            L.latLng(dropPointLatLng.lat, dropPointLatLng.lng)
+        ],
+        routeWhileDragging: false,
+        addWaypoints: false,
+        lineOptions: {
+            styles: [{
+                color: 'blue',
+                opacity: 0.7,
+                weight: 4,
+                dashArray: '10, 10',
+                className: 'animated-dash'
+            }]
+        },
+        createMarker: () => null,
+        show: false,
+        fitSelectedRoutes: false,
+        showAlternatives: false,
+        containerClassName: 'display-none'
+    }).addTo(map);
+
+    // Add animation to the path
+    routeControl.on('routesfound', function(e) {
+        const path = document.querySelector('.leaflet-routing-container + .leaflet-overlay-pane path');
+        if (path) {
+            path.style.animation = 'dashedLine 30s linear infinite';
+            path.style.strokeDasharray = '10, 10';
+        }
+        // Hide routing container
+        document.querySelectorAll('.leaflet-routing-container').forEach(el => {
+            el.style.display = 'none';
+        });
+    });
+}
+
+// Update the confirm button click handler to draw the route
+document.getElementById('confirmDropPoint').addEventListener('click', function () {
+    const dropPointSelect = document.getElementById('dropPointSelect');
+    const selectedOption = dropPointSelect.options[dropPointSelect.selectedIndex];
+
+    if (selectedOption.value && window.selectedDropPoint && userMarker) {
+        const { latitude, longitude } = window.selectedDropPoint;
+
+        // Create or update drop point marker
+        if (window.dropPointMarker) {
+            map.removeLayer(window.dropPointMarker);
+        }
+
+        window.dropPointMarker = L.marker([latitude, longitude], {
+            icon: dropPointIcon
+        }).addTo(map);
+
+        // Draw the route between the user and the drop point
+        drawRouteToDropPoint(userMarker.getLatLng(), { lat: latitude, lng: longitude });
+
+        // Show both markers in view
+        map.fitBounds([
+            userMarker.getLatLng(),
+            window.dropPointMarker.getLatLng()
+        ], { padding: [50, 50] });
+
+        // Disable the select and confirm button after confirmation
+        dropPointSelect.disabled = true;
+        this.disabled = true;
+        this.textContent = 'Destination Confirmed';
+    }
+});
+
+// Add this helper function to calculate road distance
+function calculateRoadDistance(userLatLng, dropPointLatLng, callback) {
+    if (!routeControl) {
+        routeControl = L.Routing.control({
+            waypoints: [
+                L.latLng(userLatLng.lat, userLatLng.lng),
+                L.latLng(dropPointLatLng.lat, dropPointLatLng.lng)
+            ],
+            show: false,
+            createMarker: () => null,
+            routeWhileDragging: false,
+            fitSelectedRoutes: false
+        });
+    }
+
+    routeControl.route();
+    routeControl.on('routesfound', function(e) {
+        const routes = e.routes;
+        const distanceInMeters = routes[0].summary.totalDistance;
+        callback(distanceInMeters);
+    });
+}
+
+// Update the calculateDistanceToDropPoint function
+function calculateDistanceToDropPoint(userMarker, dropPointMarker) {
+    if (!userMarker || !dropPointMarker) return;
+    
+    const userLatLng = userMarker.getLatLng();
+    const dropPointLatLng = dropPointMarker.getLatLng();
+    
+    calculateRoadDistance(userLatLng, dropPointLatLng, (distanceInMeters) => {
+        const distanceInKm = distanceInMeters / 1000;
+        
+        // Format distance text
+        const distanceText = distanceInKm < 1 
+            ? `${Math.round(distanceInMeters)}m`
+            : `${distanceInKm.toFixed(1)}km`;
+            
+        // Keep existing ETA calculation
+        const averageSpeedKmH = 30;
+        const etaMinutes = Math.round((distanceInKm / averageSpeedKmH) * 60);
+        const etaText = etaMinutes >= 60 
+            ? `${Math.floor(etaMinutes/60)}h ${etaMinutes%60}m`
+            : `${etaMinutes}m`;
+            
+        // Update UI
+        document.querySelector('.journey-stats .stat-item:nth-child(1) .stat-value').textContent = etaText;
+        document.querySelector('.journey-stats .stat-item:nth-child(2) .stat-value').textContent = distanceText;
+        
+        // Update marker popup
+        dropPointMarker.setPopupContent(
+            `Drop point: ${window.selectedDropPoint.dropname}<br>` +
+            `Road Distance: ${distanceText}<br>` +
+            `ETA: ${etaText}`
+        );
+    });
+    
+    return true; // Return true to indicate calculation is in progress
+}
+
+// ...existing code...
+</script>
 </body>
 </html>

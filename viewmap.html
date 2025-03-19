@@ -6,6 +6,7 @@
     <title>Project Para - Bus Details</title>
     <!-- Leaflet CSS for OpenStreetMap -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <style>
         :root {
             --primary-gradient-start: #4a6bff;
@@ -292,6 +293,28 @@
         .leaflet-control-layers-expanded {
             padding: 10px !important;
         }
+
+        /* Add these styles for the route line */
+        .leaflet-routing-container {
+            display: none; /* Hide the routing text instructions */
+        }
+        
+        .leaflet-routing-alt {
+            display: none;
+        }
+        
+        .route-line {
+            stroke: var(--primary-gradient-start);
+            stroke-width: 4;
+            stroke-dasharray: 10, 10;
+            animation: dash 20s linear infinite;
+        }
+        
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -1000;
+            }
+        }
     </style>
 </head>
 <body>
@@ -355,6 +378,11 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <!-- Then load Leaflet -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <!-- Then load Leaflet Routing Machine -->
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+    <!-- Add this new script -->
+    <script src="https://router.project-osrm.org/route/v1/driving/"></script>
+
     <!-- Then your custom script -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -545,14 +573,13 @@
                 // Store new marker
                 busMarkers.set(busInfo.busNumber, marker);
 
-                // If we have user location, update bounds to show both markers
+                // If we have user location, update route
                 if (userMarker) {
                     const userLatLng = userMarker.getLatLng();
-                    const bounds = L.latLngBounds(
-                        [userLatLng.lat, userLatLng.lng],
-                        [busInfo.latitude, busInfo.longitude]
+                    updateRoute(
+                        { lat: userLatLng.lat, lng: userLatLng.lng },
+                        { latitude: busInfo.latitude, longitude: busInfo.longitude }
                     );
-                    map.fitBounds(bounds, { padding: [50, 50] });
                 }
             }
 
@@ -615,7 +642,7 @@
                 });
 
                 // Calculate ETA using 60 km/h speed
-                const averageSpeedKmH = 60; // Changed from 30 to 60
+                const averageSpeedKmH = 30; // Changed from 30 to 60
                 const etaMinutes = Math.round((distanceInKm / averageSpeedKmH) * 60);
 
                 // Log ETA calculation
@@ -696,32 +723,23 @@
                     userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map);
                 }
 
-                // If we have bus location, calculate distance and update UI
+                // If we have bus location, update route
                 if (selectedBus) {
                     const busMarker = busMarkers.get(selectedBus.busNumber);
                     if (busMarker) {
                         const busLatLng = busMarker.getLatLng();
+                        updateRoute(
+                            { lat: latitude, lng: longitude },
+                            { latitude: busLatLng.lat, longitude: busLatLng.lng }
+                        );
+                        
+                        // Fit bounds to show both markers and route
                         const bounds = L.latLngBounds(
                             [latitude, longitude],
                             [busLatLng.lat, busLatLng.lng]
                         );
                         map.fitBounds(bounds, { padding: [50, 50] });
                     }
-
-                    const distance = map.distance(
-                        [latitude, longitude],
-                        [selectedBus.latitude, selectedBus.longitude]
-                    ) / 1000; // Convert to kilometers
-
-                    // Update distance display
-                    document.getElementById('distanceValue').textContent = 
-                        distance < 1
-                            ? `${Math.round(distance * 1000)}m`
-                            : `${distance.toFixed(1)}km`;
-
-                    // Calculate ETA (assuming average speed of 30km/h)
-                    const etaMinutes = Math.round((distance / 30) * 60);
-                    document.getElementById('etaValue').textContent = `${etaMinutes} mins`;
                 }
             }
 
@@ -975,6 +993,135 @@
                     window.location.href = 'onboard.html';
                 }, 500);
             });
+
+            // Add after map initialization but before other code
+            let routingControl = null;
+
+            // Function to update the route between user and bus
+            function updateRoute(userPosition, busPosition) {
+                // Remove existing route if any
+                if (routingControl) {
+                    map.removeControl(routingControl);
+                }
+
+                // Create new route
+                routingControl = L.Routing.control({
+                    waypoints: [
+                        L.latLng(userPosition.lat, userPosition.lng),
+                        L.latLng(busPosition.latitude, busPosition.longitude)
+                    ],
+                    router: new L.Routing.OSRMv1({
+                        serviceUrl: 'https://router.project-osrm.org/route/v1',
+                        profile: 'driving'
+                    }),
+                    lineOptions: {
+                        styles: [{
+                            color: '#4a6bff',
+                            opacity: 0.8,
+                            weight: 4,
+                            className: 'route-line'
+                        }],
+                        addWaypoints: false
+                    },
+                    createMarker: function() { return null; },
+                    fitSelectedRoutes: false,
+                    showAlternatives: false,
+                    show: false // Hide the routing text instructions
+                }).addTo(map);
+
+                // Handle route calculation success
+                routingControl.on('routesfound', function(e) {
+                    const routes = e.routes;
+                    const summary = routes[0].summary;
+                    
+                    // Update distance based on route
+                    const distanceInKm = summary.totalDistance / 1000;
+                    
+                    // Calculate ETA using constant 30kph speed
+                    const speedKmH = 30;
+                    const timeInHours = distanceInKm / speedKmH;
+                    const timeInMinutes = Math.round(timeInHours * 60);
+                    
+                    // Update UI with distance and constant-speed ETA
+                    document.getElementById('distanceValue').textContent = 
+                        distanceInKm < 1 
+                            ? `${Math.round(summary.totalDistance)}m`
+                            : `${distanceInKm.toFixed(1)}km`;
+                    
+                    document.getElementById('etaValue').textContent = 
+                        timeInMinutes >= 60 
+                            ? `${Math.floor(timeInMinutes/60)}h ${timeInMinutes%60}m`
+                            : `${timeInMinutes}m`;
+                });
+
+                // Handle routing errors
+                routingControl.on('routingerror', function(e) {
+                    console.error('Routing error:', e);
+                });
+            }
+
+            // Modify your existing updateUserLocation function
+            function updateUserLocation(position) {
+                const { latitude, longitude } = position.coords;
+                
+                // Update user marker
+                if (userMarker) {
+                    userMarker.setLatLng([latitude, longitude]);
+                } else {
+                    userMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map);
+                }
+
+                // If we have bus location, update route
+                if (selectedBus) {
+                    const busMarker = busMarkers.get(selectedBus.busNumber);
+                    if (busMarker) {
+                        const busLatLng = busMarker.getLatLng();
+                        updateRoute(
+                            { lat: latitude, lng: longitude },
+                            { latitude: busLatLng.lat, longitude: busLatLng.lng }
+                        );
+                        
+                        // Fit bounds to show both markers and route
+                        const bounds = L.latLngBounds(
+                            [latitude, longitude],
+                            [busLatLng.lat, busLatLng.lng]
+                        );
+                        map.fitBounds(bounds, { padding: [50, 50] });
+                    }
+                }
+            }
+
+            // Also update your updateBusMarker function
+            function updateBusMarker(busInfo) {
+                // Remove existing marker if it exists
+                const existingMarker = busMarkers.get(busInfo.busNumber);
+                if (existingMarker) {
+                    existingMarker.remove();
+                }
+
+                // Create new marker
+                const marker = L.marker(
+                    [busInfo.latitude, busInfo.longitude],
+                    { icon: busIcon }
+                ).addTo(map)
+                .bindPopup(`
+                    <b>Bus ${busInfo.busNumber}</b><br>
+                    Route: ${busInfo.routeName}<br>
+                    Last updated: ${new Date(busInfo.recorded_at).toLocaleTimeString()}
+                `);
+
+                // Store new marker
+                busMarkers.set(busInfo.busNumber, marker);
+
+                // If we have user location, update route
+                if (userMarker) {
+                    const userLatLng = userMarker.getLatLng();
+                    updateRoute(
+                        { lat: userLatLng.lat, lng: userLatLng.lng },
+                        { latitude: busInfo.latitude, longitude: busInfo.longitude }
+                    );
+                }
+            }
         });
     </script>
 </body>
