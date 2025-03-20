@@ -1714,7 +1714,7 @@
 
                     dropPointMarker = L.marker([data.latitude, data.longitude], { icon: dropPointIcon }).addTo(map);
                     map.fitBounds([
-                        [userMarker.getLatLng().lat, userMarker.getLatLng().lng],
+                        [userMarker.getLatLng().lat, userMarker.getLatLng.lng],
                         [data.latitude, data.longitude]
                     ]);
 
@@ -2084,14 +2084,53 @@
 });
     </script>
     <script>
-        // Alert driver button functionality
-        document.getElementById('alertDriverBtn').addEventListener('click', function() {
-            showNotification('Driver has been alerted');
-            this.disabled = true;
-            setTimeout(() => {
-                this.disabled = false;
-            }, 5000); // Re-enable button after 5 seconds
-        });
+        // Replace the existing alert driver button functionality
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get bus info from session storage
+        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+        if (!busInfo || !busInfo.busnumber) {
+            throw new Error('Bus information not found. Please try boarding again.');
+        }
+
+        // Update the most recent trip for this bus
+        const { data, error } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('busnumber', busInfo.busnumber)
+            .order('recorded_at', { ascending: false })
+            .limit(1)
+            .select();
+
+        if (error) throw error;
+
+        // Show success notification
+        showNotification('Driver has been alerted');
+        
+        // Update button state
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+        
+        // Re-enable button after 5 seconds
+        setTimeout(() => {
+            this.disabled = false;
+            this.textContent = 'Alert Driver';
+            this.style.backgroundColor = '';
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error alerting driver:', error);
+        showNotification(error.message || 'Unable to alert driver. Please try again.');
+        
+        // Reset button state
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+    }
+});
     </script>
     <script>
         // ...existing code...
@@ -2229,23 +2268,258 @@ function calculateDistanceToDropPoint(userMarker, dropPointMarker) {
         const averageSpeedKmH = 30;
         const etaMinutes = Math.round((distanceInKm / averageSpeedKmH) * 60);
         const etaText = etaMinutes >= 60 
-            ? `${Math.floor(etaMinutes/60)}h ${etaMinutes%60}m`
+            ? `${Math.floor(etaMinutes / 60)}h ${etaMinutes % 60}m`
             : `${etaMinutes}m`;
-            
+
         // Update UI
         document.querySelector('.journey-stats .stat-item:nth-child(1) .stat-value').textContent = etaText;
         document.querySelector('.journey-stats .stat-item:nth-child(2) .stat-value').textContent = distanceText;
-        
-        // Update marker popup
+
+        // Update the marker popup with distance info
         dropPointMarker.setPopupContent(
             `Drop point: ${window.selectedDropPoint.dropname}<br>` +
-            `Road Distance: ${distanceText}<br>` +
+            `Distance: ${distanceText}<br>` +
             `ETA: ${etaText}`
         );
     });
-    
+
     return true; // Return true to indicate calculation is in progress
 }
+
+// ...existing code...
+</script>
+<script>
+// When boarding a bus
+indow.location.href = `onboard.html?busnumber=${busnumber}&routeid=${routeid}`;
+
+// Or store in session storage
+sessionStorage.setItem('onboardBusInfo', JSON.stringify({ tripId: tripId }));
+</script>
+<script>
+function alertDriver() {
+    // Get the current trip ID from the page
+    const tripId = getCurrentTripId(); // Make sure this function exists and returns the current trip ID
+    
+    if (!tripId) {
+        console.error('No active trip found');
+        alert('No active trip found. Please make sure you are on an active trip before alerting the driver.');
+        return;
+    }
+
+    // Update the bustrip table with alert_driver = true
+    fetch('/api/alert-driver', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tripId: tripId })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert('Driver has been notified successfully!');
+    })
+    .catch(error => {
+        console.error('Error alerting driver:', error);
+        alert('Failed to alert driver. Please try again.');
+    });
+}
+
+// Replace the existing event listener at line 2126
+document.getElementById('alertDriverButton').addEventListener('click', alertDriver);
+// ...existing code...
+sessionStorage.setItem('onboardBusInfo', JSON.stringify({ 
+    busnumber: busnumber,
+    routeid: routeid
+}));
+</script>
+<script>
+// ...existing code...
+
+// Update bus info storage
+function storeBusInfo(busnumber, routeid, routeName) {
+    const busInfo = {
+        busnumber: busnumber,
+        routeid: routeid,
+        routeName: routeName || 'Route ' + busnumber,
+        timestamp: new Date().toISOString()
+    };
+    sessionStorage.setItem('onboardBusInfo', JSON.stringify(busInfo));
+    return busInfo;
+}
+
+// Update alert driver functionality
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // First try URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        let busnumber = urlParams.get('busnumber');
+        let routeid = urlParams.get('routeid');
+
+        // If not in URL, try session storage
+        if (!busnumber || !routeid) {
+            const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+            if (!busInfo || !busInfo.busnumber) {
+                // Try to get the most recent active bus from bustrip table
+                const { data, error } = await supabase
+                    .from('bustrip')
+                    .select('busnumber, routeid')
+                    .order('recorded_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                if (error || !data) {
+                    throw new Error('Could not find active bus. Please try boarding again.');
+                }
+
+                // Store the retrieved bus info
+                busnumber = data.busnumber;
+                routeid = data.routeid;
+                storeBusInfo(busnumber, routeid);
+            } else {
+                busnumber = busInfo.busnumber;
+                routeid = busInfo.routeid;
+            }
+        }
+
+        // Update the alert_driver flag
+        const { error } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('busnumber', busnumber)
+            .order('recorded_at', { ascending: false })
+            .limit(1);
+
+        if (error) throw error;
+
+        // Show success notification
+        showNotification('Driver has been alerted');
+        
+        // Update button state
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+        
+        // Re-enable button after 5 seconds
+        setTimeout(() => {
+            this.disabled = false;
+            this.textContent = 'Alert Driver';
+            this.style.backgroundColor = '';
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error alerting driver:', error);
+        showNotification(error.message || 'Unable to alert driver. Please try again.');
+        
+        // Reset button state
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+    }
+});
+
+// Remove incorrect session storage code
+// Delete or comment out these lines:
+// sessionStorage.setItem('onboardBusInfo', JSON.stringify({ tripId: tripId }));
+
+// ...existing code...
+</script>
+<script>
+// ...existing code...
+
+// Update alert driver functionality
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // First try URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        let busnumber = urlParams.get('busnumber');
+        let routeid = urlParams.get('routeid');
+        let tripId;
+
+        // If not in URL, try session storage
+        if (!busnumber || !routeid) {
+            const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+            if (!busInfo || !busInfo.busnumber) {
+                // Try to get the most recent active bus from bustrip table
+                const { data, error } = await supabase
+                    .from('bustrip')
+                    .select('id, busnumber, routeid')
+                    .order('recorded_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                if (error || !data) {
+                    throw new Error('Could not find active bus. Please try boarding again.');
+                }
+
+                busnumber = data.busnumber;
+                routeid = data.routeid;
+                tripId = data.id;
+            } else {
+                busnumber = busInfo.busnumber;
+                routeid = busInfo.routeid;
+            }
+        }
+
+        // Update the alert_driver flag
+        const { data, error } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('busnumber', busnumber)
+            .order('recorded_at', { ascending: false })
+            .limit(1)
+            .select('id')
+            .single();
+
+        if (error) throw error;
+        tripId = data.id;
+
+        // Show success notification
+        showNotification('Driver has been alerted');
+        
+        // Update button state
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+        
+        // Acknowledge stop after 5 seconds
+        setTimeout(async () => {
+            const acknowledgeStop = async (tripId) => {
+                const { data, error } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .eq('id', tripId);
+
+                if (error) console.error('Error acknowledging stop:', error);
+                else console.log('✅ Stop request acknowledged:', data);
+            };
+
+            await acknowledgeStop(tripId);
+            
+            // Reset button state
+            this.disabled = false;
+            this.textContent = 'Alert Driver';
+            this.style.backgroundColor = '';
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error alerting driver:', error);
+        showNotification(error.message || 'Unable to alert driver. Please try again.');
+        
+        // Reset button state
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+    }
+});
 
 // ...existing code...
 </script>
