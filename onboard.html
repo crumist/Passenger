@@ -2097,16 +2097,28 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
             throw new Error('Bus information not found. Please try boarding again.');
         }
 
-        // Update the most recent trip for this bus
-        const { data, error } = await supabase
+        // Get the exact bus trip by bus number
+        const { data: tripData, error: tripError } = await supabase
             .from('bustrip')
-            .update({ alert_driver: true })
+            .select('id, busnumber')
             .eq('busnumber', busInfo.busnumber)
+            .eq('status', 'active') // Assuming there's a status column to check if trip is active
             .order('recorded_at', { ascending: false })
             .limit(1)
-            .select();
+            .single();
 
-        if (error) throw error;
+        if (tripError || !tripData) {
+            throw new Error('Could not find active bus trip. Please try boarding again.');
+        }
+
+        // Update the alert_driver flag for the specific bus
+        const { error: updateError } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('id', tripData.id)
+            .eq('busnumber', busInfo.busnumber);
+
+        if (updateError) throw updateError;
 
         // Show success notification
         showNotification('Driver has been alerted');
@@ -2115,8 +2127,22 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
         this.textContent = 'Driver Alerted';
         this.style.backgroundColor = '#4cd964';
         
-        // Re-enable button after 5 seconds
-        setTimeout(() => {
+        // Acknowledge stop after 5 seconds
+        setTimeout(async () => {
+            const acknowledgeStop = async () => {
+                const { error } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .eq('id', tripData.id)
+                    .eq('busnumber', busInfo.busnumber);
+
+                if (error) console.error('Error acknowledging stop:', error);
+                else console.log('✅ Stop request acknowledged for bus:', busInfo.busnumber);
+            };
+
+            await acknowledgeStop();
+            
+            // Reset button state
             this.disabled = false;
             this.textContent = 'Alert Driver';
             this.style.backgroundColor = '';
@@ -2521,6 +2547,363 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
     }
 });
 
+// ...existing code...
+</script>
+<script>
+// ...existing code...
+
+// Update alert driver functionality
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get bus info from session storage
+        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+        if (!busInfo || !busInfo.busnumber) {
+            throw new Error('Bus information not found. Please try boarding again.');
+        }
+
+        // Get the specific bus by bus number and active status
+        const { data: tripData, error: tripError } = await supabase
+            .from('bustrip')
+            .select('id, busnumber')
+            .eq('busnumber', busInfo.busnumber)
+            .eq('status', 'active')
+            .single();
+
+        if (tripError || !tripData) {
+            throw new Error(`Could not find active trip for bus ${busInfo.busnumber}. Please try boarding again.`);
+        }
+
+        // Update alert_driver to true for only this specific bus
+        const { error: updateError } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('id', tripData.id)
+            .eq('busnumber', busInfo.busnumber); // Double check with bus number
+
+        if (updateError) throw updateError;
+
+        // Show success notification
+        showNotification(`Driver of Bus ${busInfo.busnumber} has been alerted`);
+        
+        // Update button state
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+        
+        // Acknowledge stop after 5 seconds for only this specific bus
+        setTimeout(async () => {
+            const { error: ackError } = await supabase
+                .from('bustrip')
+                .update({ alert_driver: false })
+                .eq('id', tripData.id)
+                .eq('busnumber', busInfo.busnumber); // Double check with bus number
+
+            if (ackError) {
+                console.error('Error acknowledging stop:', ackError);
+            } else {
+                console.log(`✅ Stop request acknowledged for bus: ${busInfo.busnumber}`);
+            }
+            
+            // Reset button state
+            this.disabled = false;
+            this.textContent = 'Alert Driver';
+            this.style.backgroundColor = '';
+        }, 5000);
+
+    } catch (error) {
+        console.error('Error alerting driver:', error);
+        showNotification(error.message || 'Unable to alert driver. Please try again.');
+        
+        // Reset button state
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+    }
+});
+
+// ...existing code...
+</script>
+<script>
+// ...existing code...
+
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get bus info from session storage
+        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+        
+        console.log('Current bus info:', busInfo); // Debug log
+        
+        if (!busInfo || !busInfo.busnumber) {
+            throw new Error('Bus information not found');
+        }
+
+        // First get the current trip for this specific bus
+        const { data: tripData, error: tripError } = await supabase
+            .from('bustrip')
+            .select('*')
+            .eq('busnumber', busInfo.busnumber)
+            .eq('status', 'active')
+            .single();
+
+        console.log('Found trip:', tripData); // Debug log
+
+        if (tripError || !tripData) {
+            throw new Error(`No active trip found for bus ${busInfo.busnumber}`);
+        }
+
+        // Update only this specific trip
+        const { error: updateError } = await supabase
+            .from('bustrip')
+            .update({ 
+                alert_driver: true,
+                last_alert_time: new Date().toISOString() 
+            })
+            .match({ 
+                id: tripData.id,
+                busnumber: busInfo.busnumber 
+            });
+
+        if (updateError) throw updateError;
+
+        showNotification(`Alert sent to Bus ${busInfo.busnumber}`);
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+
+        // Reset after 5 seconds
+        setTimeout(async () => {
+            try {
+                const { error: resetError } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .match({ 
+                        id: tripData.id,
+                        busnumber: busInfo.busnumber 
+                    });
+
+                if (resetError) throw resetError;
+                
+                this.disabled = false;
+                this.textContent = 'Alert Driver';
+                this.style.backgroundColor = '';
+            } catch (error) {
+                console.error('Error resetting alert:', error);
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error('Alert driver error:', error);
+        showNotification(error.message);
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+        this.style.backgroundColor = '';
+    }
+});
+
+// ...existing code...
+</script>
+<script>
+// ...existing code...
+
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get bus info from session storage
+        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+        
+        // Get the bus number shown in the UI
+        const uiBusNumber = document.querySelector('.route-number').textContent.replace('Bus ', '').trim();
+        
+        console.log('UI Bus Number:', uiBusNumber); // Debug log
+        console.log('Stored Bus Info:', busInfo); // Debug log
+        
+        if (!busInfo || !busInfo.busnumber) {
+            throw new Error('Bus information not found');
+        }
+
+        // Verify that the stored bus number matches the UI
+        if (busInfo.busnumber !== uiBusNumber) {
+            throw new Error('Bus number mismatch. Please refresh the page or board again.');
+        }
+
+        // First get the current trip for this specific bus
+        const { data: tripData, error: tripError } = await supabase
+            .from('bustrip')
+            .select('*')
+            .eq('busnumber', uiBusNumber) // Use the UI bus number
+            .eq('status', 'active')
+            .single();
+
+        console.log('Found trip:', tripData); // Debug log
+
+        if (tripError || !tripData) {
+            throw new Error(`No active trip found for bus ${uiBusNumber}`);
+        }
+
+        // Double verify the bus number before updating
+        if (tripData.busnumber !== uiBusNumber) {
+            throw new Error('Bus trip mismatch. Please refresh the page.');
+        }
+
+        // Update only this specific trip
+        const { error: updateError } = await supabase
+            .from('bustrip')
+            .update({ 
+                alert_driver: true,
+                last_alert_time: new Date().toISOString() 
+            })
+            .match({ 
+                id: tripData.id,
+                busnumber: uiBusNumber // Use the UI bus number
+            });
+
+        if (updateError) throw updateError;
+
+        showNotification(`Alert sent to Bus ${uiBusNumber}`);
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+
+        // Reset after 5 seconds
+        setTimeout(async () => {
+            try {
+                const { error: resetError } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .match({ 
+                        id: tripData.id,
+                        busnumber: uiBusNumber // Use the UI bus number
+                    });
+
+                if (resetError) throw resetError;
+                
+                this.disabled = false;
+                this.textContent = 'Alert Driver';
+                this.style.backgroundColor = '';
+            } catch (error) {
+                console.error('Error resetting alert:', error);
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error('Alert driver error:', error);
+        showNotification(error.message);
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+        this.style.backgroundColor = '';
+    }
+});
+
+// ...existing code...
+</script>
+<script>
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get the exact bus number from the UI
+        const uiBusElement = document.querySelector('.route-number');
+        const uiBusNumber = uiBusElement.textContent.split(' ')[1]; // Split on space and get second part
+        
+        console.log('UI shows bus number:', uiBusNumber);
+
+        // Get bus info from session storage
+        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
+        console.log('Session storage bus info:', busInfo);
+        
+        if (!busInfo || !busInfo.busnumber) {
+            throw new Error(`No bus info found in session storage`);
+        }
+
+        // Convert both numbers to strings and trim for comparison
+        const storedBusNumber = String(busInfo.busnumber).trim();
+        const uiNumber = String(uiBusNumber).trim();
+
+        console.log('Comparing bus numbers - UI:', uiNumber, 'Stored:', storedBusNumber);
+
+        // Strict comparison of bus numbers
+        if (uiNumber !== storedBusNumber) {
+            throw new Error(`Bus number mismatch: UI shows ${uiNumber} but stored number is ${storedBusNumber}`);
+        }
+
+        // Get the current active trip for this specific bus
+        const { data: tripData, error: tripError } = await supabase
+            .from('bustrip')
+            .select('*')
+            .eq('busnumber', uiNumber) // Use UI bus number
+            .eq('status', 'active')
+            .single();
+
+        console.log('Found trip data:', tripData);
+
+        if (tripError || !tripData) {
+            throw new Error(`No active trip found for bus ${uiNumber}`);
+        }
+
+        // Final verification before update
+        if (String(tripData.busnumber).trim() !== uiNumber) {
+            throw new Error(`Database bus number (${tripData.busnumber}) doesn't match UI bus number (${uiNumber})`);
+        }
+
+        // Update only this specific trip
+        const { error: updateError } = await supabase
+            .from('bustrip')
+            .update({ 
+                alert_driver: true,
+                last_alert_time: new Date().toISOString() 
+            })
+            .match({ 
+                id: tripData.id,
+                busnumber: uiNumber,
+                status: 'active'
+            });
+
+        if (updateError) throw updateError;
+
+        showNotification(`Alert sent to Bus ${uiNumber}`);
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+
+        // Reset after 5 seconds
+        setTimeout(async () => {
+            try {
+                const { error: resetError } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .match({ 
+                        id: tripData.id,
+                        busnumber: uiNumber,
+                        status: 'active'
+                    });
+
+                if (resetError) throw resetError;
+                
+                this.disabled = false;
+                this.textContent = 'Alert Driver';
+                this.style.backgroundColor = '';
+            } catch (error) {
+                console.error('Error resetting alert:', error);
+                showNotification('Error resetting alert status');
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error('Alert driver error:', error);
+        showNotification(error.message);
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+        this.style.backgroundColor = '';
+    }
+});
 // ...existing code...
 </script>
 </body>
