@@ -2811,65 +2811,89 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
         this.textContent = 'Alerting driver...';
 
         // Get the exact bus number from the UI
+        const uiBusNumber = document.querySelector('.route-number').textContent.split(' ')[1].trim();
+        
+        // Update alert flag for just this bus number
+        const { error } = await supabase
+            .from('bustrip')
+            .update({ alert_driver: true })
+            .eq('busnumber', uiBusNumber);
+
+        if (error) throw error;
+
+        showNotification(`Alert sent to Bus ${uiBusNumber}`);
+        this.textContent = 'Driver Alerted';
+        this.style.backgroundColor = '#4cd964';
+
+        // Reset after 5 seconds
+        setTimeout(async () => {
+            try {
+                const { error: resetError } = await supabase
+                    .from('bustrip')
+                    .update({ alert_driver: false })
+                    .eq('busnumber', uiBusNumber);
+
+                if (resetError) throw resetError;
+                
+                this.disabled = false;
+                this.textContent = 'Alert Driver';
+                this.style.backgroundColor = '';
+            } catch (error) {
+                console.error('Error resetting alert:', error);
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error('Alert driver error:', error);
+        showNotification(error.message);
+        this.disabled = false;
+        this.textContent = 'Alert Driver';
+    }
+});
+</script>
+<script>
+// ...existing code...
+
+document.getElementById('alertDriverBtn').addEventListener('click', async function() {
+    try {
+        // Disable button immediately
+        this.disabled = true;
+        this.textContent = 'Alerting driver...';
+
+        // Get the EXACT bus number from the UI
         const uiBusElement = document.querySelector('.route-number');
-        const uiBusNumber = uiBusElement.textContent.split(' ')[1]; // Split on space and get second part
+        const uiBusNumber = uiBusElement.textContent.split(' ')[1].trim();
         
-        console.log('UI shows bus number:', uiBusNumber);
+        console.log('Attempting to alert bus number:', uiBusNumber);
 
-        // Get bus info from session storage
-        const busInfo = JSON.parse(sessionStorage.getItem('onboardBusInfo'));
-        console.log('Session storage bus info:', busInfo);
-        
-        if (!busInfo || !busInfo.busnumber) {
-            throw new Error(`No bus info found in session storage`);
-        }
-
-        // Convert both numbers to strings and trim for comparison
-        const storedBusNumber = String(busInfo.busnumber).trim();
-        const uiNumber = String(uiBusNumber).trim();
-
-        console.log('Comparing bus numbers - UI:', uiNumber, 'Stored:', storedBusNumber);
-
-        // Strict comparison of bus numbers
-        if (uiNumber !== storedBusNumber) {
-            throw new Error(`Bus number mismatch: UI shows ${uiNumber} but stored number is ${storedBusNumber}`);
-        }
-
-        // Get the current active trip for this specific bus
+        // Get the EXACT bus with matching number from database
         const { data: tripData, error: tripError } = await supabase
             .from('bustrip')
-            .select('*')
-            .eq('busnumber', uiNumber) // Use UI bus number
-            .eq('status', 'active')
+            .select('id, busnumber')
+            .eq('busnumber', uiBusNumber) // Match exactly with UI bus number
             .single();
 
-        console.log('Found trip data:', tripData);
-
         if (tripError || !tripData) {
-            throw new Error(`No active trip found for bus ${uiNumber}`);
+            throw new Error(`Bus ${uiBusNumber} not found in database`);
         }
 
-        // Final verification before update
-        if (String(tripData.busnumber).trim() !== uiNumber) {
-            throw new Error(`Database bus number (${tripData.busnumber}) doesn't match UI bus number (${uiNumber})`);
+        // Double check that bus numbers match EXACTLY
+        if (tripData.busnumber !== uiBusNumber) {
+            throw new Error('Bus number mismatch between UI and database');
         }
 
-        // Update only this specific trip
+        // Update ONLY this specific bus by both ID and bus number
         const { error: updateError } = await supabase
             .from('bustrip')
-            .update({ 
-                alert_driver: true,
-                last_alert_time: new Date().toISOString() 
-            })
+            .update({ alert_driver: true })
             .match({ 
                 id: tripData.id,
-                busnumber: uiNumber,
-                status: 'active'
+                busnumber: uiBusNumber // Extra check to ensure we update the right bus
             });
 
         if (updateError) throw updateError;
 
-        showNotification(`Alert sent to Bus ${uiNumber}`);
+        showNotification(`Alert sent to Bus ${uiBusNumber}`);
         this.textContent = 'Driver Alerted';
         this.style.backgroundColor = '#4cd964';
 
@@ -2881,8 +2905,7 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
                     .update({ alert_driver: false })
                     .match({ 
                         id: tripData.id,
-                        busnumber: uiNumber,
-                        status: 'active'
+                        busnumber: uiBusNumber // Keep exact matching when resetting
                     });
 
                 if (resetError) throw resetError;
@@ -2892,7 +2915,6 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
                 this.style.backgroundColor = '';
             } catch (error) {
                 console.error('Error resetting alert:', error);
-                showNotification('Error resetting alert status');
             }
         }, 5000);
 
@@ -2904,6 +2926,7 @@ document.getElementById('alertDriverBtn').addEventListener('click', async functi
         this.style.backgroundColor = '';
     }
 });
+
 // ...existing code...
 </script>
 </body>
